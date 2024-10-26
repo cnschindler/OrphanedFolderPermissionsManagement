@@ -55,8 +55,6 @@ function ConnectExchange
     # Check if a connection to an exchange server exists and connect if necessary...
     if (-NOT (Get-PSSession | Where-Object ConfigurationName -EQ "Microsoft.Exchange"))
     {
-        $LogPrefix = "ConnectExchange"
-
         # Test if Exchange Management Shell Module is installed - if not, exit the script
         $EMSModuleFile = (Get-ItemProperty HKLM:\SOFTWARE\Microsoft\ExchangeServer\v15\Setup -ErrorAction SilentlyContinue).MsiInstallPath + "bin\RemoteExchange.ps1"
         
@@ -65,7 +63,7 @@ function ConnectExchange
         {
             # Write Error end exit the script
             $ErrorMessage = "Exchange Management Shell Module not found on this computer. Please run this script on a computer with Exchange Management Tools installed!"
-            Write-LogFile -LogPrefix $LogPrefix -Message $ErrorMessage
+            Write-LogFile -Message $ErrorMessage
             Exit
         }
 
@@ -76,12 +74,12 @@ function ConnectExchange
             {
                 # Dot source the EMS Script
                 . $($EMSModuleFile) -ErrorAction Stop | Out-Null
-                Write-LogFile -LogPrefix $LogPrefix -Message "Successfully loaded Exchange Management Shell Module."
+                Write-LogFile -Message "Successfully loaded Exchange Management Shell Module."
             }
 
             catch
             {
-                Write-LogFile -LogPrefix $LogPrefix -Message "Unable to load Exchange Management Shell Module." -ErrorInfo $_
+                Write-LogFile -Message "Unable to load Exchange Management Shell Module." -ErrorInfo $_
                 Exit
             }
 
@@ -89,12 +87,12 @@ function ConnectExchange
             try
             {
                 Connect-ExchangeServer -auto -ClientApplication:ManagementShell -ErrorAction Stop | Out-Null
-                Write-LogFile -LogPrefix $LogPrefix -Message "Successfully connected to Exchange Server."
+                Write-LogFile -Message "Successfully connected to Exchange Server."
             }
 
             catch
             {
-                Write-LogFile -LogPrefix $LogPrefix -Message "Unable to connect to Exchange Server." -ErrorInfo $_
+                Write-LogFile -Message "Unable to connect to Exchange Server." -ErrorInfo $_
                 Exit
             }
         }
@@ -121,11 +119,11 @@ Function Get-OrphanedFolderPermissions
 
     foreach ($mbx in $mbxs)
     {
-        $Message = "$($mbx.Name): Processing Mailbox"
+        $Message = "Processing Mailbox: $($mbx.Name)"
         Write-Host -ForegroundColor Green -Object $Message
         Write-LogFile -Message $Message
 
-        $folders = Get-MailboxFolderStatistics -Identity $mbx | Where-Object Containerclass -like "IPF.*"
+        $folders = Get-MailboxFolderStatistics -Identity $mbx.SamAccountName | Where-Object Containerclass -like "IPF.*"
         #$folders = $folders | where-object Folderpath -ne "/Top of Information Store"
         $folders = $folders | Where-Object Containerclass -ne "IPF.Configuration"
         #$folders = $folders | Where-Object Containerclass -notlike "IPF.Contact.*"
@@ -135,7 +133,7 @@ Function Get-OrphanedFolderPermissions
         
         foreach ($folder in $folders)
         {
-            $fperms = Get-MailboxFolderPermission -Identity ($FullFolderID)
+            $fperms = Get-MailboxFolderPermission -Identity ($Address + ":" + $folder.FolderID)
             $Folderpath = $folder.FolderPath.Replace('/','\')
 
             foreach ($fperm in $fperms)
@@ -144,7 +142,7 @@ Function Get-OrphanedFolderPermissions
 
                 if ($fperm.User.DisplayName -match "NT:S-1-5-")
                 {
-                    $Message = "$($mbx.Name): Found Permission for SID $($fperm.user) in folder $($Folderpath)."
+                    $Message = "Found Permission for SID $($fperm.user) in folder $($Folderpath) in mailbox $($mbx.Name)"
                     Write-Host -ForegroundColor Yellow -Object $Message
                     Write-LogFile -Message $Message
                     Add-Content -Path $CSVFullPath -Value $content
@@ -152,7 +150,7 @@ Function Get-OrphanedFolderPermissions
                 
                 elseif ($fperm.User.Displayname -like "*Administrator*")
                 {
-                    $Message = "$($mbx.Name): Found permissons for Administrator Account in folder $($Folderpath)."
+                    $Message = "Found permissons for Administrator Account in folder $($Folderpath) in mailbox $($mbx.Name)"
                     Write-Host -ForegroundColor Yellow -Object $Message
                     Write-LogFile -Message $Message
                     Add-Content -Path $CSVFullPath -Value $content
@@ -177,14 +175,14 @@ Function Remove-OrphanedFolderPermissions
 
     foreach ($folder in $folders)
     {
-        $Message = "$($folder.Mailbox): Processing Mailbox"
+        $Message = "Processing Mailbox: $($folder.Mailbox)"
         Write-Host -ForegroundColor Green -Object $Message
         Write-LogFile -Message $Message
         $FullFolderID = $Folder.Mailbox + ":" + $Folder.FolderID
 
         try
         {
-            $Message = "$($folder.Mailbox): Successfully removed permission entry $($folder.UserID)"
+            $Message = "Successfully removed permission entry $($folder.UserID) from mailbox $($folder.Mailbox)"
             Remove-MailboxFolderPermission -Identity $FullFolderID -User $folder.UserID -Confirm:$false -ErrorAction Stop
             Write-Host -ForegroundColor Yellow -Object $Message
             Write-LogFile -Message $Message
@@ -192,7 +190,7 @@ Function Remove-OrphanedFolderPermissions
 
         Catch
         {
-            $Message = "$($folder.Mailbox): Error removing permission entry $($folder.UserID)."
+            $Message = "Error removing permission entry $($folder.UserID) from mailbox $($folder.Mailbox)"
             Write-Host -ForegroundColor Red -Object "$($Message) $_"
             Write-LogFile -Message $Message -ErrorInfo $_
         }
