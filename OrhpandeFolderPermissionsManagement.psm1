@@ -1,11 +1,13 @@
 ﻿. 'C:\Program Files\Microsoft\Exchange Server\V15\bin\RemoteExchange.ps1'
 Connect-ExchangeServer -auto -ClientApplication:ManagementShell
 
-$LogFolderName = "Remove-OrphanedPermissions"
-[string]$LogPath = Join-Path -Path $BasePath -ChildPath $LogFolderName
-[string]$LogfileFullPath = Join-Path -Path $LogPath -ChildPath ("RemoveOrphanedPermissions_{0:yyyyMMdd-HHmmss}.log" -f [DateTime]::Now)
+$Script:basepath = $env:TEMP
+$Script:LogFolderName = "OrphanedFolderPermissionsManagement"
+$Script:OutputFileNamePrefix = "AffectedFolders"
+[string]$LogPath = Join-Path -Path $Script:basepath -ChildPath $Script:LogFolderName
+[string]$LogfileFullPath = Join-Path -Path $Script:LogPath -ChildPath ($Script:LogFolderName + "_{0:yyyyMMdd-HHmmss}.log" -f [DateTime]::Now)
 $Script:NoLogging
-[string]$CSVFullPath = Join-Path -Path $LogPath -ChildPath ("AffectedMailboxes_{0:yyyyMMdd-HHmmss}.txt" -f [DateTime]::Now)
+[string]$CSVFullPath = Join-Path -Path $Script:LogPath -ChildPath ($Script:OutputFileNamePrefix + "_{0:yyyyMMdd-HHmmss}.txt" -f [DateTime]::Now)
 
 function Write-LogFile
 {
@@ -54,16 +56,18 @@ function Write-LogFile
 Function Get-OrphanedFolderPermissions
 {
     [cmdletbinding()]
-    Param(
-    [Parameter(Mandatory=$true)]
-    [System.IO.DirectoryInfo]$BasePath
-    )
+    Param()
+
+    $InfoMessage = "Outputfilename is $($CSVFullPath)"
+    Write-Host -ForegroundColor Green -Object $InfoMessage
+    Write-LogFile -Message $InfoMessage
 
     # Retrieve all mailboxes
+    Write-LogFile -Message "Retrieving all mailboxes"
     $mbxs = Get-Mailbox -resultsize unlimited
 
     # Create the output file and write the header
-    Set-Content -Value "Folderpath" -Path $CSVFullPath
+    Set-Content -Value "Folder,User" -Path $CSVFullPath -Force
 
     foreach ($mbx in $mbxs)
     {
@@ -81,30 +85,30 @@ Function Get-OrphanedFolderPermissions
         
         foreach ($folder in $folders)
         {
-            $parentfolder = $folder.FolderPath.Split("/")[1]
-            $fperms = Get-MailboxFolderPermission -Identity ($Address + ":" + $folder.FolderId)
+            $FullFolderID = $Address + ":" + $folder.FolderId
+            $fperms = Get-MailboxFolderPermission -Identity ($FullFolderID)
+            $Folderpath = $folder.FolderPath.Replace('/','\')
 
             foreach ($fperm in $fperms)
             {
+                $content = $FullFolderID + "," + $fperm.user.DisplayName
+
                 if ($fperm.User.DisplayName -match "NT:S-1-5-")
                 {
-                    $Message = "$($mbx.Name): Found Permission for SID $($fperm.user) in folder $($folder.FolderPath.Replace('/','\'))."
+                    $Message = "$($mbx.Name): Found Permission for SID $($fperm.user) in folder $($Folderpath)."
                     Write-Host -ForegroundColor Yellow -Object $Message
                     Write-LogFile -Message $Message
+                    Add-Content -Path $CSVFullPath -Value $content
                 }
-
+                
                 elseif ($fperm.User.Displayname -like "*Administrator*")
                 {
-                    $Message = "$($mbx.Name): Found permissons for Administrator Account in folder $($folder.FolderPath.Replace('/','\'))."
+                    $Message = "$($mbx.Name): Found permissons for Administrator Account in folder $($Folderpath)."
                     Write-Host -ForegroundColor Yellow -Object $Message
                     Write-LogFile -Message $Message
+                    Add-Content -Path $CSVFullPath -Value $content
                 }
             }
-        }
-
-        if ($AffectedMBX -eq $true)
-        {
-            Add-Content -Value $Address -Path $CSVFullPath
         }
     }
 }
@@ -113,104 +117,33 @@ Function Remove-OrphanedFolderPermissions
 {
     [cmdletbinding()]
     Param(
-    [Parameter(ParameterSetName="Remove")]
+    [Parameter(Mandatory=$true)]
     [System.IO.FileInfo]$FileWithFoldersAffected
     )
 
     # Import file with mailboxes to cleanup
-    $mbxs = Import-Csv -Path $FileWithFoldersAffected
+    $Folders = Import-Csv -Path $FileWithFoldersAffected
 
-    foreach ($mbx in $mbxs)
+    foreach ($folder in $folders)
     {
-        $AffectedMBX = $false
-
-        $Message = "$($mbx.Name): Processing Mailbox"
+        $mbx = $folder.folder.Split(":")[0]
+        $Message = "$($mbx): Processing Mailbox"
         Write-Host -ForegroundColor Green -Object $Message
         Write-LogFile -Message $Message
 
-        $folders = Get-MailboxFolderStatistics -Identity $mbx | Where-Object Containerclass -like "IPF.*"
-        #$folders = $folders | where-object Folderpath -ne "/Top of Information Store"
-        $folders = $folders | Where-Object Containerclass -ne "IPF.Configuration"
-        #$folders = $folders | Where-Object Containerclass -notlike "IPF.Contact.*"
-        $folders = $folders | Where-Object Containerclass -ne "IPF.Note.OutlookHomepage"
-        $folders = $folders | Where-Object Containerclass -ne "IPF.Note.SocialConnector.FeedItems"
-        $Address = $mbx.WindowsEmailAddress.ToString()
-        
-            foreach ($folder in $folders)
+        try
         {
-            $parentfolder = $folder.FolderPath.Split("/")[1]
-            $fperms = Get-MailboxFolderPermission -Identity ($Address + ":" + $folder.FolderId)
-
-            foreach ($fperm in $fperms)
-            {
-                if ($fperm.User.DisplayName -match "NT:S-1-5-")
-                {
-                    $AffectedMBX = $true
-
-                    $Message = "$($mbx.Name): Found Permission for SID $($fperm.user) in folder $($folder.FolderPath.Replace('/','\'))."
-                    Write-Host -ForegroundColor Yellow -Object $Message
-                    Write-LogFile -Message $Message
-
-                    if ($RemoveOrphanedPermissions)
-                    {
-                        $Message = "$($mbx.Name): Removing permissions for SID $($fperm.user)."
-                        Write-Host -ForegroundColor Yellow -Object $Message
-                        Write-LogFile -Message $Message
-
-                        try
-                        {
-                            $Message = "$($mbx.Name): Successfully removed permission"
-                            Remove-MailboxFolderPermission -Identity $fperm.Identity -User $fperm.User.DisplayName -Confirm:$false -ErrorAction Stop
-                            Write-Host -ForegroundColor Yellow -Object $Message
-                            Write-LogFile -Message $Message
-                        }
-
-                        Catch
-                        {
-                            $Message = "$($mbx.Name): Error removing permission."
-                            Write-Host -ForegroundColor Red -Object "$($Message) $_"
-                            Write-LogFile -Message $Message -ErrorInfo $_
-                        }
-                    }
-                }
-
-                elseif ($fperm.User.Displayname -like "*Administrator*")
-                {
-                    $AffectedMBX = $true
-
-                    $Message = "$($mbx.Name): Found permissons for Administrator Account in folder $($folder.FolderPath.Replace('/','\'))."
-                    Write-Host -ForegroundColor Yellow -Object $Message
-                    Write-LogFile -Message $Message
-
-                    if ($RemoveOrphanedPermissions)
-                    {
-                        $Message = "$($mbx.Name): Removing permissions for Administrator account..."
-                        Write-Host -ForegroundColor Yellow -Object $Message
-                        Write-LogFile -Message $Message
-
-                        try
-                        {
-                            $Message = "$($mbx.Name): Successfully removed permission"
-                            Remove-MailboxFolderPermission -Identity $fperm.Identity -User $fperm.User.DisplayName -Confirm:$false -ErrorAction Stop
-                            Write-Host -ForegroundColor Yellow -Object $Message
-                            Write-LogFile -Message $Message
-                        }
-
-                        Catch
-                        {
-                            $Message = "$($mbx.Name): Error removing permission."
-                            Write-Host -ForegroundColor Red -Object "$($Message) $_"
-                            Write-LogFile -Message $Message -ErrorInfo $_
-                        }
-                    }
-                }
-                
-            }
+            $Message = "$($mbx): Successfully removed permission entry $($folder.User)"
+            Remove-MailboxFolderPermission -Identity $folder.Folder -User $folder.User -Confirm:$false -ErrorAction Stop
+            Write-Host -ForegroundColor Yellow -Object $Message
+            Write-LogFile -Message $Message
         }
 
-        if ($AffectedMBX -eq $true)
+        Catch
         {
-            Add-Content -Value $Address -Path $CSVFullPath
+            $Message = "$($mbx): Error removing permissionentry $($folder.User)."
+            Write-Host -ForegroundColor Red -Object "$($Message) $_"
+            Write-LogFile -Message $Message -ErrorInfo $_
         }
     }
 }
