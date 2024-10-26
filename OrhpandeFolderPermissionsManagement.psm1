@@ -67,7 +67,7 @@ Function Get-OrphanedFolderPermissions
     $mbxs = Get-Mailbox -resultsize unlimited
 
     # Create the output file and write the header
-    Set-Content -Value "Folder,User" -Path $CSVFullPath -Force
+    Set-Content -Value "Mailbox,FolderPath,FolderID,UserID" -Path $CSVFullPath -Force
 
     foreach ($mbx in $mbxs)
     {
@@ -85,13 +85,12 @@ Function Get-OrphanedFolderPermissions
         
         foreach ($folder in $folders)
         {
-            $FullFolderID = $Address + ":" + $folder.FolderId
             $fperms = Get-MailboxFolderPermission -Identity ($FullFolderID)
             $Folderpath = $folder.FolderPath.Replace('/','\')
 
             foreach ($fperm in $fperms)
             {
-                $content = $FullFolderID + "," + $fperm.user.DisplayName
+                $content = $Address + "," + $Folderpath + "," + $Folder.FolderId + "," + $fperm.user.DisplayName
 
                 if ($fperm.User.DisplayName -match "NT:S-1-5-")
                 {
@@ -118,7 +117,7 @@ Function Remove-OrphanedFolderPermissions
     [cmdletbinding()]
     Param(
     [Parameter(Mandatory=$true)]
-    [System.IO.FileInfo]$FileWithFoldersAffected
+    [System.IO.FileInfo]$FileWithAffectedFolders
     )
 
     # Import file with mailboxes to cleanup
@@ -126,22 +125,22 @@ Function Remove-OrphanedFolderPermissions
 
     foreach ($folder in $folders)
     {
-        $mbx = $folder.folder.Split(":")[0]
-        $Message = "$($mbx): Processing Mailbox"
+        $Message = "$($folder.Mailbox): Processing Mailbox"
         Write-Host -ForegroundColor Green -Object $Message
         Write-LogFile -Message $Message
+        $FullFolderID = $Folder.Mailbox + ":" + $Folder.FolderID
 
         try
         {
-            $Message = "$($mbx): Successfully removed permission entry $($folder.User)"
-            Remove-MailboxFolderPermission -Identity $folder.Folder -User $folder.User -Confirm:$false -ErrorAction Stop
+            $Message = "$($folder.Mailbox): Successfully removed permission entry $($folder.UserID)"
+            Remove-MailboxFolderPermission -Identity $FullFolderID -User $folder.UserID -Confirm:$false -ErrorAction Stop
             Write-Host -ForegroundColor Yellow -Object $Message
             Write-LogFile -Message $Message
         }
 
         Catch
         {
-            $Message = "$($mbx): Error removing permissionentry $($folder.User)."
+            $Message = "$($folder.Mailbox): Error removing permission entry $($folder.UserID)."
             Write-Host -ForegroundColor Red -Object "$($Message) $_"
             Write-LogFile -Message $Message -ErrorInfo $_
         }
