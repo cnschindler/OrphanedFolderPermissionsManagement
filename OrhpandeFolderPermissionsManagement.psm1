@@ -83,9 +83,9 @@ foreach ($mbx in $mbxs)
     Write-LogFile -Message $Message
 
     $folders = Get-MailboxFolderStatistics -Identity $mbx | Where-Object Containerclass -like "IPF.*"
-    $folders = $folders | where-object Folderpath -ne "/Top of Information Store"
+    #$folders = $folders | where-object Folderpath -ne "/Top of Information Store"
     $folders = $folders | Where-Object Containerclass -ne "IPF.Configuration"
-    $folders = $folders | Where-Object Containerclass -notlike "IPF.Contact.*"
+    #$folders = $folders | Where-Object Containerclass -notlike "IPF.Contact.*"
     $folders = $folders | Where-Object Containerclass -ne "IPF.Note.OutlookHomepage"
     $folders = $folders | Where-Object Containerclass -ne "IPF.Note.SocialConnector.FeedItems"
     $Address = $mbx.WindowsEmailAddress.ToString()
