@@ -1,7 +1,4 @@
-﻿. 'C:\Program Files\Microsoft\Exchange Server\V15\bin\RemoteExchange.ps1'
-Connect-ExchangeServer -auto -ClientApplication:ManagementShell
-
-$Script:basepath = $env:TEMP
+﻿$Script:basepath = $env:TEMP
 $Script:LogFolderName = "OrphanedFolderPermissionsManagement"
 $Script:OutputFileNamePrefix = "AffectedFolders"
 [string]$LogPath = Join-Path -Path $Script:basepath -ChildPath $Script:LogFolderName
@@ -53,10 +50,63 @@ function Write-LogFile
     }
 }
 
+function ConnectExchange
+{
+    # Check if a connection to an exchange server exists and connect if necessary...
+    if (-NOT (Get-PSSession | Where-Object ConfigurationName -EQ "Microsoft.Exchange"))
+    {
+        $LogPrefix = "ConnectExchange"
+
+        # Test if Exchange Management Shell Module is installed - if not, exit the script
+        $EMSModuleFile = (Get-ItemProperty HKLM:\SOFTWARE\Microsoft\ExchangeServer\v15\Setup -ErrorAction SilentlyContinue).MsiInstallPath + "bin\RemoteExchange.ps1"
+        
+        # If the EMS Module wasn't found
+        if (-Not (Test-Path $EMSModuleFile))
+        {
+            # Write Error end exit the script
+            $ErrorMessage = "Exchange Management Shell Module not found on this computer. Please run this script on a computer with Exchange Management Tools installed!"
+            Write-LogFile -LogPrefix $LogPrefix -Message $ErrorMessage
+            Exit
+        }
+
+        else
+        {
+            # Load Exchange Management Shell
+            try
+            {
+                # Dot source the EMS Script
+                . $($EMSModuleFile) -ErrorAction Stop | Out-Null
+                Write-LogFile -LogPrefix $LogPrefix -Message "Successfully loaded Exchange Management Shell Module."
+            }
+
+            catch
+            {
+                Write-LogFile -LogPrefix $LogPrefix -Message "Unable to load Exchange Management Shell Module." -ErrorInfo $_
+                Exit
+            }
+
+            # Connect to Exchange Server
+            try
+            {
+                Connect-ExchangeServer -auto -ClientApplication:ManagementShell -ErrorAction Stop | Out-Null
+                Write-LogFile -LogPrefix $LogPrefix -Message "Successfully connected to Exchange Server."
+            }
+
+            catch
+            {
+                Write-LogFile -LogPrefix $LogPrefix -Message "Unable to connect to Exchange Server." -ErrorInfo $_
+                Exit
+            }
+        }
+    }
+}
+
 Function Get-OrphanedFolderPermissions
 {
     [cmdletbinding()]
     Param()
+
+    ConnectExchange
 
     $InfoMessage = "Outputfilename is $($CSVFullPath)"
     Write-Host -ForegroundColor Green -Object $InfoMessage
@@ -120,6 +170,8 @@ Function Remove-OrphanedFolderPermissions
     [System.IO.FileInfo]$FileWithAffectedFolders
     )
 
+    ConnectExchange
+    
     # Import file with mailboxes to cleanup
     $Folders = Import-Csv -Path $FileWithFoldersAffected
 
